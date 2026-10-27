@@ -53,6 +53,8 @@ export interface ExamResultDoc {
   score: number;
   totalMarks: number;
   totalQuestions?: number;
+  mcqCount?: number;
+  percentage?: number;
   correctCount: number;
   wrongCount: number;
   timeTaken: number;

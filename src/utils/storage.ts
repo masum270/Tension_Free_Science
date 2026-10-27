@@ -1,116 +1,57 @@
 import { UserProfile, ExamResult } from '../types/quiz.js';
-import { calculateLevel } from './quizLogic.js';
-import { calcLevel } from '../lib/levelSystem.js';
-import { updateUserExamStats, getCurrentUser } from './auth.js';
 
-const STORAGE_KEY = 'class910_livemcq_user_v1';
-
-// ✅ FRESH - No dummy data
 export const DEFAULT_USER_PROFILE: UserProfile = {
-  name: '', // empty, will be set after login
-  school: '',
-  avatar: '', // empty, no default image
-  totalXP: 0,
+  id: 'guest_user',
+  name: 'শিক্ষার্থী (Guest Student)',
+  email: 'student@ssc-prep.bd',
+  xp: 150,
   level: 1,
-  totalExams: 0,
+  examsCompleted: 0,
   totalCorrect: 0,
-  totalAttempted: 0,
-  accuracyHistory: [],
-  attemptedIds: [],
-  recentExams: []
+  totalAnswered: 0,
+  history: [],
+  streak: 1,
+  lastActiveDate: new Date().toISOString()
 };
 
+const STORAGE_KEY = 'ssc_prep_user_profile_v1';
+
 export function getUserProfile(): UserProfile {
-  if (typeof window === 'undefined') {
-    return DEFAULT_USER_PROFILE;
-  }
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) {
-      // ✅ Don't auto save dummy, return empty fresh profile
-      return DEFAULT_USER_PROFILE;
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      return { ...DEFAULT_USER_PROFILE, ...parsed };
     }
-    const parsed = JSON.parse(raw);
-    // Purge old demo user if present in local storage
-    if (parsed.name === 'মাসুম বিল্লাহ' || (parsed.totalXP === 140 && parsed.totalExams === 2)) {
-      localStorage.removeItem(STORAGE_KEY);
-      return DEFAULT_USER_PROFILE;
-    }
-    return {
-      ...DEFAULT_USER_PROFILE,
-      ...parsed,
-      level: Math.max(1, calculateLevel(parsed.totalXP || 0))
-    };
   } catch (e) {
-    console.error('Error reading user profile from localStorage:', e);
-    return DEFAULT_USER_PROFILE;
+    console.warn('Failed to parse profile from localStorage', e);
   }
+  return DEFAULT_USER_PROFILE;
 }
 
-export function saveUserProfile(profile: UserProfile, latestExam?: ExamResult): void {
-  if (typeof window === 'undefined') return;
+export function saveUserProfile(profile: UserProfile): void {
   try {
-    profile.level = calcLevel(profile.totalXP);
     localStorage.setItem(STORAGE_KEY, JSON.stringify(profile));
-
-    // Also sync with tfs_users
-    const active = getCurrentUser();
-    if (!active) return; // ✅ Don't sync if no logged in user
-    const identifier = active.id;
-    updateUserExamStats(identifier, {
-      totalXP: profile.totalXP,
-      level: profile.level,
-      totalExams: profile.totalExams,
-      totalCorrect: profile.totalCorrect,
-      totalAttempted: profile.totalAttempted,
-      school: profile.school,
-      avatar: profile.avatar,
-      latestExam
-    });
-
-    window.dispatchEvent(new Event('tfs_leaderboard_updated'));
   } catch (e) {
-    console.error('Error saving user profile to localStorage:', e);
+    console.warn('Failed to save profile to localStorage', e);
   }
 }
 
 export function recordExamCompletion(result: ExamResult): UserProfile {
   const current = getUserProfile();
-
-  const newAttemptedIds = [...current.attemptedIds];
-  result.answers.forEach((a) => {
-    if (!newAttemptedIds.includes(a.question.id)) {
-      newAttemptedIds.push(a.question.id);
-    }
-  });
-
-  const xpEarned = result.xpEarned ?? 100;
-  const updatedXP = current.totalXP + xpEarned;
-  const updatedTotalExams = current.totalExams + 1;
-  const updatedTotalCorrect = current.totalCorrect + result.correctCount;
-  const updatedTotalAttempted = current.totalAttempted + (result.totalQuestions - result.skippedCount);
-  const updatedAccuracyHistory = [...current.accuracyHistory.slice(-19), result.accuracy];
-  const updatedRecentExams = [result, ...current.recentExams.slice(0, 19)];
+  const xpEarned = Math.max(10, result.correctCount * 10);
+  const updatedHistory = [result, ...(current.history || [])].slice(0, 50);
 
   const updated: UserProfile = {
     ...current,
-    totalXP: updatedXP,
-    level: calcLevel(updatedXP),
-    totalExams: updatedTotalExams,
-    totalCorrect: updatedTotalCorrect,
-    totalAttempted: updatedTotalAttempted,
-    accuracyHistory: updatedAccuracyHistory,
-    attemptedIds: newAttemptedIds,
-    recentExams: updatedRecentExams
+    xp: (current.xp || 0) + xpEarned,
+    examsCompleted: (current.examsCompleted || 0) + 1,
+    totalCorrect: (current.totalCorrect || 0) + result.correctCount,
+    totalAnswered: (current.totalAnswered || 0) + result.totalQuestions,
+    history: updatedHistory,
+    lastActiveDate: new Date().toISOString()
   };
 
-  saveUserProfile(updated, result);
+  saveUserProfile(updated);
   return updated;
-}
-
-// ✅ Extra: Function to make fresh
-export function clearUserProfile() {
-  if (typeof window !== 'undefined') {
-    localStorage.removeItem(STORAGE_KEY);
-  }
 }

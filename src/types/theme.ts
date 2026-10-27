@@ -1,47 +1,17 @@
-export type ThemeId = 'dark' | 'nature' | 'ocean' | 'sunset' | 'tfs';
+export type ThemeId = 'emerald' | 'indigo' | 'rose' | 'amber' | 'cyan' | 'dark';
 
 export interface ThemeConfig {
   id: ThemeId;
   name: string;
-  nameEn: string;
-  color: string;
-  bgPreview: string;
+  primary: string;
+  bgGradient: string;
 }
 
 export const AVAILABLE_THEMES: ThemeConfig[] = [
-  {
-    id: 'dark',
-    name: 'মিডনাইট',
-    nameEn: 'Midnight',
-    color: '#38BDF8',
-    bgPreview: '#0B0F19'
-  },
-  {
-    id: 'nature',
-    name: 'এমারাল্ড',
-    nameEn: 'Emerald',
-    color: '#10B981',
-    bgPreview: '#062319'
-  },
-  {
-    id: 'ocean',
-    name: 'ওশান',
-    nameEn: 'Ocean',
-    color: '#0284C7',
-    bgPreview: '#071A2E'
-  },
-  {
-    id: 'sunset',
-    name: 'এম্বার',
-    nameEn: 'Ember',
-    color: '#F59E0B',
-    bgPreview: '#1A0F24'
-  },
-  {
-    id: 'tfs',
-    name: 'ভেলভেট',
-    nameEn: 'Velvet',
-    color: '#A855F7',
-    bgPreview: '#1E0A2F'
-  }
+  { id: 'emerald', name: 'Emerald Green', primary: '#10B981', bgGradient: 'from-emerald-900/20 to-slate-900' },
+  { id: 'indigo', name: 'Royal Indigo', primary: '#6366F1', bgGradient: 'from-indigo-900/20 to-slate-900' },
+  { id: 'rose', name: 'Rose Red', primary: '#F43F5E', bgGradient: 'from-rose-900/20 to-slate-900' },
+  { id: 'amber', name: 'Warm Amber', primary: '#F59E0B', bgGradient: 'from-amber-900/20 to-slate-900' },
+  { id: 'cyan', name: 'Ocean Cyan', primary: '#06B6D4', bgGradient: 'from-cyan-900/20 to-slate-900' },
+  { id: 'dark', name: 'Midnight Dark', primary: '#64748B', bgGradient: 'from-slate-900 to-black' },
 ];

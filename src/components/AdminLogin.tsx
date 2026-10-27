@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { Eye, EyeOff, Lock, Mail, ShieldCheck, AlertCircle } from 'lucide-react';
-import { auth } from '../services/firebase.js';
+import { auth, db, doc, getDoc } from '../services/firebase.js';
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword } from 'firebase/auth';
+import { OWNER_EMAIL, ADMIN_PIN } from '../services/adminService.js';
 
 interface AdminLoginProps {
   onSuccess?: () => void;
@@ -24,7 +25,28 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({ onSuccess, onCancel }) =
     const cleanEmail = email.trim().toLowerCase();
     const cleanPin = pin.trim();
 
-    if (cleanEmail === 'masumbillahmmn2314@gmail.com' && cleanPin === '2429005267') {
+    let isAuthorized = false;
+    let authorizedRole = 'super_admin';
+
+    if (cleanEmail === OWNER_EMAIL.toLowerCase() && cleanPin === ADMIN_PIN) {
+      isAuthorized = true;
+    } else {
+      try {
+        const memberRef = doc(db, 'team_members', cleanEmail);
+        const memberSnap = await getDoc(memberRef);
+        if (memberSnap.exists()) {
+          const data = memberSnap.data();
+          if (data.status === 'active' && data.customPIN && data.customPIN === cleanPin) {
+            isAuthorized = true;
+            authorizedRole = data.role || 'admin';
+          }
+        }
+      } catch (err) {
+        console.warn('Team access check warning:', err);
+      }
+    }
+
+    if (isAuthorized) {
       try {
         try {
           await signInWithEmailAndPassword(auth, cleanEmail, password);
@@ -45,6 +67,7 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({ onSuccess, onCancel }) =
         if (typeof window !== 'undefined') {
           localStorage.setItem('isAdmin', 'true');
           localStorage.setItem('adminEmail', cleanEmail);
+          localStorage.setItem('adminRole', authorizedRole);
           sessionStorage.setItem('adminPinVerified', 'true');
           window.location.href = '/tfs-admin-2024-secure-x9k2';
         }
@@ -53,6 +76,7 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({ onSuccess, onCancel }) =
         if (typeof window !== 'undefined') {
           localStorage.setItem('isAdmin', 'true');
           localStorage.setItem('adminEmail', cleanEmail);
+          localStorage.setItem('adminRole', authorizedRole);
           sessionStorage.setItem('adminPinVerified', 'true');
           window.location.href = '/tfs-admin-2024-secure-x9k2';
         }
@@ -60,7 +84,7 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({ onSuccess, onCancel }) =
       }
     } else {
       setIsLoading(false);
-      setError('Wrong PIN or Email');
+      setError('ভুল ইমেইল অথবা সিকিউরিটি পিন (Wrong PIN or Email)');
     }
   };
 

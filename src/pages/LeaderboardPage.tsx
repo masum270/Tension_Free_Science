@@ -4,7 +4,7 @@ import { getLocalResults } from '../services/adminService.js';
 import { ExamResultDoc } from '../types/admin.js';
 import { AuthUser } from '../types/auth.js';
 import { SUBJECTS } from '../data/subjects.js';
-import { toBengaliNumber, formatTimer } from '../utils/quizLogic.js';
+import { toBengaliNumber, formatTimer, formatTimeMMSS } from '../utils/quizLogic.js';
 import { calcLevel, LEVEL_DETAILS } from '../lib/levelSystem.js';
 import {
   Trophy,
@@ -56,6 +56,37 @@ export const LeaderboardPage: React.FC<LeaderboardPageProps> = ({
       const list: ExamResultDoc[] = [];
       snap.forEach((d: any) => {
         const data = d.data() as any;
+
+        // 1. Dynamic total questions from exam: mcqCount (15, 30, 50, 100), totalQuestions, totalMarks
+        const total = Number(data.mcqCount || data.totalQuestions || data.totalMarks || (data.answers ? Object.keys(data.answers).length : 0)) || 15;
+
+        // 2. Score is number of correct answers (correctCount / correctAnswers)
+        let correct = 0;
+        if (typeof data.correctCount === 'number') {
+          correct = data.correctCount;
+        } else if (typeof data.correctAnswers === 'number') {
+          correct = data.correctAnswers;
+        } else if (typeof data.score === 'number') {
+          // If legacy score exceeded total questions, it was XP (earnedXP), not correct question count
+          correct = data.score <= total ? data.score : Math.round(((data.percentage || 0) / 100) * total);
+        }
+        correct = Math.max(0, Math.min(correct, total));
+
+        // 3. Percentage calculation: Math.round((correct / total) * 100)
+        const percentage = Math.round((correct / total) * 100);
+
+        // 4. Time format: parse seconds properly
+        let rawTime = data.timeTaken ?? data.timeTakenSeconds ?? 0;
+        if (typeof rawTime === 'string') {
+          if (rawTime.includes(':')) {
+            const parts = rawTime.split(':');
+            rawTime = (parseInt(parts[0], 10) || 0) * 60 + (parseInt(parts[1], 10) || 0);
+          } else {
+            rawTime = parseInt(rawTime, 10) || 0;
+          }
+        }
+        const timeSecs = Math.max(0, Number(rawTime) || 0);
+
         list.push({
           id: d.id,
           userId: data.uid || data.userId || d.id,
@@ -64,16 +95,19 @@ export const LeaderboardPage: React.FC<LeaderboardPageProps> = ({
           photoURL: data.photoURL,
           subject: data.subject || 'সাধারণ বিজ্ঞান',
           chapter: data.chapter || 'সকল অধ্যায়',
-          score: data.score ?? 0,
-          totalMarks: data.totalQuestions || data.totalMarks || 10,
-          correctCount: data.correctCount ?? 0,
-          wrongCount: data.wrongCount ?? 0,
-          timeTaken: data.timeTaken ?? 60,
+          score: correct,
+          totalMarks: total,
+          totalQuestions: total,
+          mcqCount: total,
+          correctCount: correct,
+          wrongCount: data.wrongCount ?? Math.max(0, total - correct),
+          percentage: percentage,
+          timeTaken: timeSecs,
           submittedAt:
             data.submittedAt ||
             (data.createdAt?.toDate ? data.createdAt.toDate().toISOString() : new Date(data.timestamp || Date.now()).toISOString()),
           date: data.date || new Date().toISOString().split('T')[0],
-          xpEarned: data.xpEarned ?? 100,
+          xpEarned: data.xpEarned ?? (correct * 10),
           rank: 1
         });
       });
@@ -187,8 +221,14 @@ export const LeaderboardPage: React.FC<LeaderboardPageProps> = ({
       );
     }
 
-    // Sort descending by score, ascending by timeTaken
-    list.sort((a, b) => (b.score ?? 0) - (a.score ?? 0) || (a.timeTaken ?? 0) - (b.timeTaken ?? 0));
+    // Sort descending by percentage, then score, ascending by timeTaken
+    list.sort((a, b) => {
+      const pDiff = (b.percentage ?? 0) - (a.percentage ?? 0);
+      if (pDiff !== 0) return pDiff;
+      const sDiff = (b.score ?? 0) - (a.score ?? 0);
+      if (sDiff !== 0) return sDiff;
+      return (a.timeTaken ?? 0) - (b.timeTaken ?? 0);
+    });
 
     // Recalculate rank
     return list.map((item, idx) => ({
@@ -403,10 +443,11 @@ export const LeaderboardPage: React.FC<LeaderboardPageProps> = ({
             </h3>
             <span className="text-[11px] font-semibold text-slate-400 block mb-2">{top3[1].subject}</span>
             <div className="inline-block px-3 py-1 rounded-xl bg-slate-100 dark:bg-slate-800 font-extrabold text-sm text-indigo-600 dark:text-indigo-400">
-              {toBengaliNumber(Math.min(top3[1].score, top3[1].totalMarks || 15))} / {toBengaliNumber(top3[1].totalMarks || 15)}
+              {toBengaliNumber(top3[1].score)} / {toBengaliNumber(top3[1].totalQuestions || top3[1].totalMarks || 15)}
+              <span className="ml-1 text-xs text-indigo-500">({toBengaliNumber(top3[1].percentage ?? Math.round((top3[1].score / (top3[1].totalQuestions || 15)) * 100))}%)</span>
             </div>
-            <div className="mt-2 text-[10px] text-slate-500">
-              সময়: {toBengaliNumber(formatTimer(top3[1].timeTaken))}
+            <div className="mt-2 text-[10px] text-slate-500 font-mono">
+              সময়: {formatTimeMMSS(top3[1].timeTaken)}
             </div>
           </div>
 
@@ -428,10 +469,11 @@ export const LeaderboardPage: React.FC<LeaderboardPageProps> = ({
               🏆 {top3[0].subject} চ্যাম্পিয়ন
             </span>
             <div className="inline-block px-4 py-1.5 rounded-xl bg-amber-400/20 font-black text-base text-amber-700 dark:text-amber-300 border border-amber-300/40">
-              {toBengaliNumber(Math.min(top3[0].score, top3[0].totalMarks || 15))} / {toBengaliNumber(top3[0].totalMarks || 15)}
+              {toBengaliNumber(top3[0].score)} / {toBengaliNumber(top3[0].totalQuestions || top3[0].totalMarks || 15)}
+              <span className="ml-1.5 text-xs text-amber-800 dark:text-amber-200">({toBengaliNumber(top3[0].percentage ?? Math.round((top3[0].score / (top3[0].totalQuestions || 15)) * 100))}%)</span>
             </div>
-            <div className="mt-2 text-[11px] font-semibold text-slate-500">
-              সময়: {toBengaliNumber(formatTimer(top3[0].timeTaken))}
+            <div className="mt-2 text-[11px] font-semibold text-slate-500 font-mono">
+              সময়: {formatTimeMMSS(top3[0].timeTaken)}
             </div>
           </div>
 
@@ -448,10 +490,11 @@ export const LeaderboardPage: React.FC<LeaderboardPageProps> = ({
             </h3>
             <span className="text-[11px] font-semibold text-slate-400 block mb-2">{top3[2].subject}</span>
             <div className="inline-block px-3 py-1 rounded-xl bg-slate-100 dark:bg-slate-800 font-extrabold text-sm text-indigo-600 dark:text-indigo-400">
-              {toBengaliNumber(Math.min(top3[2].score, top3[2].totalMarks || 15))} / {toBengaliNumber(top3[2].totalMarks || 15)}
+              {toBengaliNumber(top3[2].score)} / {toBengaliNumber(top3[2].totalQuestions || top3[2].totalMarks || 15)}
+              <span className="ml-1 text-xs text-indigo-500">({toBengaliNumber(top3[2].percentage ?? Math.round((top3[2].score / (top3[2].totalQuestions || 15)) * 100))}%)</span>
             </div>
-            <div className="mt-2 text-[10px] text-slate-500">
-              সময়: {toBengaliNumber(formatTimer(top3[2].timeTaken))}
+            <div className="mt-2 text-[10px] text-slate-500 font-mono">
+              সময়: {formatTimeMMSS(top3[2].timeTaken)}
             </div>
           </div>
         </div>
@@ -582,7 +625,7 @@ export const LeaderboardPage: React.FC<LeaderboardPageProps> = ({
                       </td>
 
                       <td className="py-3.5 px-4 text-center text-slate-500 dark:text-slate-400 font-mono">
-                        {toBengaliNumber(formatTimer(item.timeTaken))}
+                        {formatTimeMMSS(item.timeTaken)}
                       </td>
 
                       <td className="py-3.5 px-4 text-right text-slate-400 text-[11px]">

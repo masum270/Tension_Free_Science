@@ -110,16 +110,31 @@ export const HomePage: React.FC<HomePageProps> = ({
   useEffect(() => {
     const loadVideos = async () => {
       try {
-        const res = await fetch("/data/videos.json");
+        const res = await fetch('/api/youtube/videos');
+        if (res.ok) {
+          const text = await res.text();
+          if (!text.includes('<!doctype') && !text.includes('<html')) {
+            const data = JSON.parse(text);
+            if (Array.isArray(data.videos) && data.videos.length > 0) {
+              setVideos(data.videos);
+              return;
+            }
+          }
+        }
+      } catch {
+        // Fallback to local videosData
+      }
+
+      try {
+        const res = await fetch('/data/videos.json');
         const text = await res.text();
-        if (text.includes("<!doctype") || text.includes("<html")) return [];
+        if (text.includes('<!doctype') || text.includes('<html')) return;
         const parsed = JSON.parse(text);
         if (Array.isArray(parsed) && parsed.length > 0) {
           setVideos(parsed);
         }
-        return parsed;
       } catch {
-        return [];
+        // Keep initial videosData
       }
     };
     loadVideos();

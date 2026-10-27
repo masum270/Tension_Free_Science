@@ -16,3 +16,10 @@ test('loginAsDemoStudent generates a valid student session with demo user proper
   assert.equal(demo.isVerified, true);
   assert.ok((demo.totalXP ?? 0) >= 0);
 });
+
+test('hashPassword safely handles Unicode and Bengali characters without throwing', () => {
+  const hash = hashPassword('পাসওয়ার্ড১২৩');
+  assert.ok(hash.length > 0);
+  assert.equal(verifyPassword('পাসওয়ার্ড১২৩', hash), true);
+  assert.equal(verifyPassword('ভুলপাসওয়ার্ড', hash), false);
+});

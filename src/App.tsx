@@ -3,10 +3,13 @@ import { SubjectInfo, ExamSessionConfig, ExamResult, UserProfile, MCQ } from './
 import { AuthUser } from './types/auth.js';
 import { ThemeId } from './types/theme.js';
 import { SUBJECTS } from './data/subjects.js';
-import mcqsData from './data/mcqs.json';
+import allMcqs from './data/index.js';
 import { selectExamQuestions } from './utils/quizLogic.js';
 import { getUserProfile, saveUserProfile, recordExamCompletion, DEFAULT_USER_PROFILE } from './utils/storage.js';
 import { getCurrentUser, logoutUser, checkRedirectResult } from './utils/auth.js';
+import { useMCQRotation } from './hooks/useMCQRotation.js';
+import { AdminReset } from './pages/AdminReset.js';
+import { resetEverything } from './utils/resetAll.js';
 import {
   auth,
   db,
@@ -33,7 +36,9 @@ import { ExamSetupModal } from './components/ExamSetupModal.js';
 import { ExamHall } from './components/ExamHall.js';
 import { ResultPage } from './components/ResultPage.js';
 import { LeaderboardPage } from './pages/LeaderboardPage.js';
-import { SecureAdminPage } from './pages/SecureAdminPage.js';
+const SecureAdminPage = React.lazy(() =>
+  import('./pages/SecureAdminPage.js').then((m) => ({ default: m.SecureAdminPage }))
+);
 import { ProfileModal } from './components/ProfileModal.js';
 import { PracticePage } from './components/PracticePage.js';
 import { WeeklyMegaExamPage } from './components/WeeklyMegaExamPage.js';
@@ -84,16 +89,30 @@ export default function App() {
 
   // Navigation view router
   const [currentView, setCurrentView] = useState<
-    'home' | 'videos' | 'exam' | 'result' | 'leaderboard' | 'practice' | 'mega-exam' | 'login' | 'register'
+    'home' | 'videos' | 'exam' | 'result' | 'leaderboard' | 'practice' | 'mega-exam' | 'login' | 'register' | 'admin-reset'
   >(() => {
     if (typeof window !== 'undefined') {
       const p = window.location.pathname.toLowerCase().replace(/\/$/, '');
       if (p === '/leaderboard') return 'leaderboard';
       if (p === '/practice') return 'practice';
       if (p === '/mega-exam') return 'mega-exam';
+      if (p === '/admin-reset') return 'admin-reset';
     }
     return 'home';
   });
+
+  const { getNextExam } = useMCQRotation();
+
+  // One-time auto reset on app update for fresh start
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const cleanKey = 'ssc_prep_reset_v4_chakro_clean';
+      if (!localStorage.getItem(cleanKey)) {
+        resetEverything();
+        localStorage.setItem(cleanKey, 'done');
+      }
+    }
+  }, []);
 
   const [redirectMessage, setRedirectMessage] = useState<string | undefined>(undefined);
   const [isForgotPasswordOpen, setIsForgotPasswordOpen] = useState(false);
@@ -123,6 +142,8 @@ export default function App() {
         setCurrentView('practice');
       } else if (clean === '/mega-exam') {
         setCurrentView('mega-exam');
+      } else if (clean === '/admin-reset') {
+        setCurrentView('admin-reset');
       } else if (clean === ADMIN_ROUTE.toLowerCase()) {
         // Will render SecureAdminPage
       } else if (clean === '' || clean === '/') {
@@ -361,26 +382,22 @@ export default function App() {
 
     setIsSetupOpen(false);
 
-    // Combine attempted IDs from local cache and Firestore answered question history
-    const attemptedPool = Array.from(new Set([...(user.attemptedIds || []), ...firestoreAnsweredIds]));
-
-    let examQuestions = selectExamQuestions(
-      mcqsData as MCQ[],
+    // Use Rotation Chakro System for non-repeating exam questions
+    let examQuestions = getNextExam(
       config.subject,
       config.chapter,
-      config.questionCount,
-      attemptedPool,
-      config.selectedChapters
+      allMcqs as MCQ[],
+      config.questionCount
     );
 
-    // Reset pool if exhausted so student can continuously practice without getting stuck
     if (examQuestions.length < config.questionCount) {
+      const attemptedPool = Array.from(new Set([...(user.attemptedIds || []), ...firestoreAnsweredIds]));
       examQuestions = selectExamQuestions(
-        mcqsData as MCQ[],
+        allMcqs as MCQ[],
         config.subject,
         config.chapter,
         config.questionCount,
-        [],
+        attemptedPool,
         config.selectedChapters
       );
     }
@@ -398,27 +415,12 @@ export default function App() {
       return;
     }
 
-    let pool = (mcqsData as MCQ[]).filter((q) => {
-      const matchSub = !subject || subject === 'all' || q.subject.trim() === subject.trim();
-      const matchCh = !chapter || chapter === 'all' || q.chapter.trim() === chapter.trim();
-      const matchType = !type || type === 'All' || type === 'All Type' || q.type === type;
-      return matchSub && matchCh && matchType;
-    });
-
-    if (pool.length === 0) {
-      pool = (mcqsData as MCQ[]).filter((q) => !chapter || chapter === 'all' || q.chapter.trim() === chapter.trim());
-    }
-    if (pool.length === 0) {
-      pool = (mcqsData as MCQ[]).filter((q) => !subject || subject === 'all' || q.subject.trim() === subject.trim());
-    }
-
-    const attemptedPool = Array.from(new Set([...(user.attemptedIds || []), ...firestoreAnsweredIds]));
-    let unattempted = pool.filter((q) => !attemptedPool.includes(q.id));
-    if (unattempted.length < 10) {
-      unattempted = pool;
-    }
-
-    const targetQuestions = unattempted.length > 0 ? unattempted.slice(0, 20) : pool.slice(0, 20);
+    const targetQuestions = getNextExam(
+      subject || 'সাধারণ বিজ্ঞান',
+      chapter || 'সকল অধ্যায়',
+      allMcqs as MCQ[],
+      20
+    );
 
     setActiveQuestions(targetQuestions);
     setActiveConfig({
@@ -512,21 +514,39 @@ export default function App() {
       window.history.replaceState(null, '', ADMIN_ROUTE);
     }
     return (
-      <SecureAdminPage
-        currentUser={authUser}
-        onNavigateHome={() => navigateTo('/', 'home')}
-        onNavigateLogin={() => navigateTo('/login', 'login')}
-      />
+      <React.Suspense
+        fallback={
+          <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center text-white gap-3">
+            <div className="w-8 h-8 border-3 border-indigo-500 border-t-transparent rounded-full animate-spin" />
+            <p className="text-xs text-slate-400 font-bold">সিকিউর অ্যাডমিন পোর্টাল লোড হচ্ছে...</p>
+          </div>
+        }
+      >
+        <SecureAdminPage
+          currentUser={authUser}
+          onNavigateHome={() => navigateTo('/', 'home')}
+          onNavigateLogin={() => navigateTo('/login', 'login')}
+        />
+      </React.Suspense>
     );
   }
 
   if (normalizedPath === ADMIN_ROUTE.toLowerCase() || currentWindowPath === ADMIN_ROUTE.toLowerCase()) {
     return (
-      <SecureAdminPage
-        currentUser={authUser}
-        onNavigateHome={() => navigateTo('/', 'home')}
-        onNavigateLogin={() => navigateTo('/login', 'login')}
-      />
+      <React.Suspense
+        fallback={
+          <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center text-white gap-3">
+            <div className="w-8 h-8 border-3 border-indigo-500 border-t-transparent rounded-full animate-spin" />
+            <p className="text-xs text-slate-400 font-bold">সিকিউর অ্যাডমিন পোর্টাল লোড হচ্ছে...</p>
+          </div>
+        }
+      >
+        <SecureAdminPage
+          currentUser={authUser}
+          onNavigateHome={() => navigateTo('/', 'home')}
+          onNavigateLogin={() => navigateTo('/login', 'login')}
+        />
+      </React.Suspense>
     );
   }
 
@@ -663,6 +683,10 @@ export default function App() {
               }
             }}
           />
+        )}
+
+        {currentView === 'admin-reset' && (
+          <AdminReset onNavigateHome={() => navigateTo('/', 'home')} />
         )}
       </main>
 

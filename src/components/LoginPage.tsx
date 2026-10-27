@@ -1,6 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import {
   auth,
+  db,
+  doc,
+  getDoc,
   googleProvider,
   signInWithPopup,
   signInWithRedirect,
@@ -11,8 +14,10 @@ import {
   createUserWithEmailAndPassword
 } from 'firebase/auth';
 import {
-  syncGoogleUserData
+  syncGoogleUserData,
+  loginAsDemoStudent
 } from '../utils/auth.js';
+import { OWNER_EMAIL, ADMIN_PIN } from '../services/adminService.js';
 import { AuthUser } from '../types/auth.js';
 import {
   FlaskConical,
@@ -77,7 +82,28 @@ export const LoginPage: React.FC<LoginPageProps> = ({
     const cleanEmail = adminEmail.trim().toLowerCase();
     const cleanPin = adminPin.trim();
 
-    if (cleanEmail === 'masumbillahmmn2314@gmail.com' && cleanPin === '2429005267') {
+    let isAuthorized = false;
+    let authorizedRole = 'super_admin';
+
+    if (cleanEmail === OWNER_EMAIL.toLowerCase() && cleanPin === ADMIN_PIN) {
+      isAuthorized = true;
+    } else {
+      try {
+        const memberRef = doc(db, 'team_members', cleanEmail);
+        const memberSnap = await getDoc(memberRef);
+        if (memberSnap.exists()) {
+          const data = memberSnap.data();
+          if (data.status === 'active' && data.customPIN && data.customPIN === cleanPin) {
+            isAuthorized = true;
+            authorizedRole = data.role || 'admin';
+          }
+        }
+      } catch (err) {
+        console.warn('Team access check warning:', err);
+      }
+    }
+
+    if (isAuthorized) {
       try {
         try {
           await signInWithEmailAndPassword(auth, cleanEmail, adminPassword);
@@ -98,6 +124,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({
         if (typeof window !== 'undefined') {
           localStorage.setItem('isAdmin', 'true');
           localStorage.setItem('adminEmail', cleanEmail);
+          localStorage.setItem('adminRole', authorizedRole);
           sessionStorage.setItem('adminPinVerified', 'true');
           window.location.href = '/tfs-admin-2024-secure-x9k2';
         }
@@ -105,13 +132,14 @@ export const LoginPage: React.FC<LoginPageProps> = ({
         if (typeof window !== 'undefined') {
           localStorage.setItem('isAdmin', 'true');
           localStorage.setItem('adminEmail', cleanEmail);
+          localStorage.setItem('adminRole', authorizedRole);
           sessionStorage.setItem('adminPinVerified', 'true');
           window.location.href = '/tfs-admin-2024-secure-x9k2';
         }
       }
     } else {
       setIsAdminLoading(false);
-      setAdminError('Wrong PIN or Email');
+      setAdminError('ভুল ইমেইল অথবা সিকিউরিটি পিন (Wrong PIN or Email)');
     }
   };
 
@@ -137,7 +165,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({
         if (err.code === 'auth/unauthorized-domain' || err?.message?.includes('unauthorized-domain')) {
           const currentHost = typeof window !== 'undefined' ? window.location.hostname : 'current-domain';
           setUnauthorizedDomain(currentHost);
-          setError(`Firebase Console এ বর্তমান প্রিভিউ ডোমেইন (${currentHost}) অনুমোদিত নয়।`);
+          setError(`এই ডোমেইনটি অনুমোদিত নয়। Firebase Console > Authentication > Settings > Authorized domains এ গিয়ে ${currentHost} এবং tension-free-science.netlify.app add করুন`);
         } else {
           setError(err?.message || 'গুগল রিডাইরেক্ট লগইন সম্পন্ন করা যায়নি।');
         }
@@ -153,7 +181,10 @@ export const LoginPage: React.FC<LoginPageProps> = ({
     }
   };
 
-
+  const handleGuestLogin = () => {
+    const demoUser = loginAsDemoStudent();
+    onSuccess(demoUser);
+  };
 
   const handleGoogleLogin = async () => {
     setError(null);
@@ -161,6 +192,8 @@ export const LoginPage: React.FC<LoginPageProps> = ({
     setIsPopupBlocked(false);
     setIsGoogleLoading(true);
     setUnauthorizedDomain(null);
+
+    const currentHost = typeof window !== 'undefined' ? window.location.hostname : 'current-domain';
 
     try {
       const result = await signInWithPopup(auth, googleProvider);
@@ -179,13 +212,31 @@ export const LoginPage: React.FC<LoginPageProps> = ({
       } else {
         setError('Google অ্যাকাউন্ট থেকে তথ্য পাওয়া যায়নি।');
       }
-    } catch {
+    } catch (popupErr: any) {
+      if (
+        popupErr?.code === 'auth/unauthorized-domain' ||
+        popupErr?.message?.includes('unauthorized-domain')
+      ) {
+        setIsGoogleLoading(false);
+        setUnauthorizedDomain(currentHost);
+        setError(`এই ডোমেইনটি অনুমোদিত নয়। Firebase Console > Authentication > Settings > Authorized domains এ গিয়ে ${currentHost} এবং tension-free-science.netlify.app add করুন`);
+        return;
+      }
+
       try {
         setSuccessInfo('Google লগইন পেজে রিডাইরেক্ট করা হচ্ছে...');
         await signInWithRedirect(auth, googleProvider);
       } catch (redirErr: any) {
         setIsGoogleLoading(false);
-        setError(redirErr?.message || 'গুগল লগইন সম্পন্ন করা যায়নি।');
+        if (
+          redirErr?.code === 'auth/unauthorized-domain' ||
+          redirErr?.message?.includes('unauthorized-domain')
+        ) {
+          setUnauthorizedDomain(currentHost);
+          setError(`এই ডোমেইনটি অনুমোদিত নয়। Firebase Console > Authentication > Settings > Authorized domains এ গিয়ে ${currentHost} এবং tension-free-science.netlify.app add করুন`);
+        } else {
+          setError(redirErr?.message || 'গুগল লগইন সম্পন্ন করা যায়নি।');
+        }
       }
     }
   };
@@ -333,6 +384,16 @@ export const LoginPage: React.FC<LoginPageProps> = ({
               </svg>
             )}
             <span>{isGoogleLoading ? 'Google পপ-আপ খোলা হচ্ছে...' : 'Google দিয়ে সরাসরি লগইন করুন'}</span>
+          </button>
+
+          {/* Guest Login Fallback Button */}
+          <button
+            type="button"
+            onClick={handleGuestLogin}
+            className="w-full py-3 px-4 rounded-2xl bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/60 dark:hover:bg-indigo-900/80 border border-indigo-200 dark:border-indigo-800 text-[#6C5CE7] dark:text-indigo-300 font-bold text-xs flex items-center justify-center gap-2 transition-all cursor-pointer shadow-xs active:scale-98"
+          >
+            <Sparkles className="w-4 h-4 text-amber-500" />
+            <span>অতিথি শিক্ষার্থী হিসেবে প্রবেশ করুন (Guest Login)</span>
           </button>
 
           {onNavigateForgotPassword && (

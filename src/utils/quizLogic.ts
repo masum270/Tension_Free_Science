@@ -11,16 +11,24 @@ export function toBengaliNumber(num: number | string): string {
 /**
  * Format seconds into MM:SS format with optional Bengali numerals
  */
-export function formatTimer(totalSeconds: number, inBengali = true): string {
-  const safeSeconds = Math.max(0, Math.floor(totalSeconds));
-  const minutes = Math.floor(safeSeconds / 60);
-  const seconds = safeSeconds % 60;
-  const formatted = `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+export function formatTimeMMSS(totalSeconds: number | string): string {
+  let secs = typeof totalSeconds === 'string' ? (parseInt(totalSeconds, 10) || 0) : (totalSeconds || 0);
+  if (isNaN(secs) || secs < 0) secs = 0;
+  const mm = Math.floor(secs / 60);
+  const ss = secs % 60;
+  return `${String(mm).padStart(2, '0')}:${String(ss).padStart(2, '0')}`;
+}
+
+/**
+ * Format seconds into MM:SS format with optional Bengali numerals
+ */
+export function formatTimer(totalSeconds: number | string, inBengali = true): string {
+  const formatted = formatTimeMMSS(totalSeconds);
   return inBengali ? toBengaliNumber(formatted) : formatted;
 }
 
 /**
- * Calculate user level based on XP: Level = floor(totalXP / 100) + 1 (or 0 if 0 XP)
+ * Calculate user level based on XP
  */
 export function calculateLevel(totalXP: number): number {
   if (totalXP <= 0) return 0;
@@ -36,7 +44,7 @@ export function calculateLevelProgress(totalXP: number): number {
 }
 
 /**
- * Calculate earned XP: +10 XP for correct, -2 XP for wrong (optional negative scoring)
+ * Calculate earned XP
  */
 export function calculateScoreXP(correctCount: number, wrongCount: number, penalty = true): number {
   const earned = correctCount * 10;
@@ -53,7 +61,7 @@ export function calculateAccuracy(correctCount: number, totalQuestions: number):
 }
 
 /**
- * Fisher-Yates array shuffle (deterministic or random)
+ * Fisher-Yates array shuffle
  */
 export function shuffleArray<T>(array: T[]): T[] {
   const arr = [...array];
@@ -65,8 +73,7 @@ export function shuffleArray<T>(array: T[]): T[] {
 }
 
 /**
- * Filter and select exam questions without duplicates, prioritizing unattempted questions.
- * Supports multiple selected chapters (e.g. Goddo / Poddo chapter selection in Bangla 1st Paper).
+ * Filter and select exam questions using Chakro Rotation (no repeat until all seen)
  */
 export function selectExamQuestions(
   allMCQs: MCQ[],
@@ -80,7 +87,6 @@ export function selectExamQuestions(
   let pool = allMCQs.filter((q) => q.subject.trim() === subject.trim());
 
   if (pool.length === 0) {
-    // Relaxed subject match
     pool = allMCQs.filter(
       (q) =>
         q.subject.toLowerCase().includes(subject.toLowerCase()) ||
@@ -88,13 +94,11 @@ export function selectExamQuestions(
     );
   }
 
-  // Filter by selected chapters if provided and not 'all'
+  // Filter by selected chapters
   if (selectedChapters && selectedChapters.length > 0 && !selectedChapters.includes('all')) {
     const chapterSet = new Set(selectedChapters.map((c) => c.trim()));
     const matching = pool.filter((q) => chapterSet.has(q.chapter.trim()));
-    if (matching.length > 0) {
-      pool = matching;
-    }
+    if (matching.length > 0) pool = matching;
   } else if (
     chapter &&
     chapter !== 'all' &&
@@ -103,9 +107,7 @@ export function selectExamQuestions(
     chapter !== 'সকল পদ্য'
   ) {
     const matching = pool.filter((q) => q.chapter.trim() === chapter.trim());
-    if (matching.length > 0) {
-      pool = matching;
-    }
+    if (matching.length > 0) pool = matching;
   }
 
   if (pool.length === 0) {
@@ -116,18 +118,38 @@ export function selectExamQuestions(
     pool = allMCQs;
   }
 
-  // Separate into unattempted and attempted
-  const attemptedSet = new Set(attemptedIds);
-  const unattempted = pool.filter((q) => !attemptedSet.has(q.id));
-  const attempted = pool.filter((q) => attemptedSet.has(q.id));
+  // Rotation Chakro logic per subject/chapter
+  const queueKey = `mcq_queue_${subject}_${chapter}`;
+  const seenKey = `mcq_seen_${subject}_${chapter}`;
 
-  // Shuffle both sets
-  const shuffledUnattempted = shuffleArray(unattempted);
-  const shuffledAttempted = shuffleArray(attempted);
+  let queue: string[] = [];
+  let seen: string[] = [];
 
-  // Combine: prioritize unattempted, then wrap around with attempted if needed
-  const combined = [...shuffledUnattempted, ...shuffledAttempted];
+  try {
+    queue = JSON.parse(localStorage.getItem(queueKey) || '[]');
+    seen = JSON.parse(localStorage.getItem(seenKey) || '[]');
+  } catch (e) {
+    queue = [];
+    seen = [];
+  }
 
-  // Return requested count (or maximum available)
-  return combined.slice(0, Math.min(count, combined.length));
+  if (queue.length === 0) {
+    const allIds = pool.map((q) => q.id);
+    queue = shuffleArray(allIds);
+    seen = [];
+  }
+
+  const nextIds = queue.slice(0, count);
+  const remaining = queue.slice(count);
+
+  const selected = nextIds.map((id) => pool.find((q) => q.id === id)).filter(Boolean) as MCQ[];
+
+  try {
+    localStorage.setItem(queueKey, JSON.stringify(remaining));
+    localStorage.setItem(seenKey, JSON.stringify([...seen, ...nextIds]));
+  } catch (e) {
+    console.warn('LocalStorage save error in selectExamQuestions:', e);
+  }
+
+  return selected.length > 0 ? selected : shuffleArray(pool).slice(0, Math.min(count, pool.length));
 }

@@ -21,7 +21,11 @@ const SESSION_STORAGE_KEY = 'tfs_auth_session_v1';
 
 export function hashPassword(plain: string): string {
   if (typeof btoa !== 'undefined') {
-    return btoa(`TFS_SALT_${plain}_SECURE`);
+    try {
+      return btoa(unescape(encodeURIComponent(`TFS_SALT_${plain}_SECURE`)));
+    } catch {
+      return btoa(`TFS_SALT_${plain}_SECURE`);
+    }
   }
   return plain;
 }
